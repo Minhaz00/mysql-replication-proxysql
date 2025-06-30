@@ -1,0 +1,23 @@
+[mysqld]
+log-bin = mysql-bin
+binlog-format = ROW
+gtid-mode = ON
+enforce-gtid-consistency = ON
+log-slave-updates = ON
+read-only = 1
+expire_logs_days = 7
+max_binlog_size = 100M
+
+# Replication settings
+relay-log = relay-bin
+relay-log-index = relay-bin.index
+skip-slave-start = 1
+
+# Performance tuning
+innodb_buffer_pool_size = 256M
+innodb_log_file_size = 64M
+max_connections = 1000
+
+# Character set
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
