@@ -1,106 +1,127 @@
 version: '3.8'
 
+networks:
+  replicanet:
+    driver: bridge
+
 services:
-  # MySQL Master
-  mysql-master:
-    image: mysql:8.0
-    container_name: mysql-master
+  # MySQL Master/Source Server
+  mysql-source:
+    image: mysql/mysql-server:5.7
+    container_name: mysql-source
+    hostname: source
+    networks:
+      - replicanet
     environment:
-      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_ROOT_PASSWORD: mypass
       MYSQL_DATABASE: testdb
-      MYSQL_USER: appuser
-      MYSQL_PASSWORD: apppass
+    command: >
+      --server-id=10
+      --log-bin=mysql-bin-1.log
+      --relay_log_info_repository=TABLE
+      --master-info-repository=TABLE
+      --gtid-mode=ON
+      --log-slave-updates=ON
+      --enforce-gtid-consistency
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-u", "root", "-pmypass"]
+      timeout: 20s
+      retries: 10
+    ports:
+      - "3306:3306"
+
+  # MySQL Replica 1
+  mysql-replica1:
+    image: mysql/mysql-server:5.7
+    container_name: mysql-replica1
+    hostname: replica1
+    networks:
+      - replicanet
+    environment:
+      MYSQL_ROOT_PASSWORD: mypass
+    command: >
+      --server-id=20
+      --log-bin=mysql-bin-1.log
+      --relay_log_info_repository=TABLE
+      --master-info-repository=TABLE
+      --gtid-mode=ON
+      --log-slave-updates=ON
+      --enforce-gtid-consistency
+      --read-only
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-u", "root", "-pmypass"]
+      timeout: 20s
+      retries: 10
     ports:
       - "3307:3306"
-    volumes:
-      - ./mysql-config/master.cnf:/etc/mysql/conf.d/master.cnf
-      - ./init-scripts/master-init.sql:/docker-entrypoint-initdb.d/master-init.sql
-      - master_data:/var/lib/mysql
-    networks:
-      - mysql-network
-    command: --server-id=1 --log-bin=mysql-bin --gtid-mode=ON --enforce-gtid-consistency=ON
+    depends_on:
+      - mysql-source
 
-  # MySQL Slave 1
-  mysql-slave1:
-    image: mysql:8.0
-    container_name: mysql-slave1
+  # MySQL Replica 2
+  mysql-replica2:
+    image: mysql/mysql-server:5.7
+    container_name: mysql-replica2
+    hostname: replica2
+    networks:
+      - replicanet
     environment:
-      MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: testdb
-      MYSQL_USER: appuser
-      MYSQL_PASSWORD: apppass
+      MYSQL_ROOT_PASSWORD: mypass
+    command: >
+      --server-id=30
+      --log-bin=mysql-bin-1.log
+      --relay_log_info_repository=TABLE
+      --master-info-repository=TABLE
+      --gtid-mode=ON
+      --log-slave-updates=ON
+      --enforce-gtid-consistency
+      --read-only
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-u", "root", "-pmypass"]
+      timeout: 20s
+      retries: 10
     ports:
       - "3308:3306"
-    volumes:
-      - ./mysql-config/slave.cnf:/etc/mysql/conf.d/slave.cnf
-      - ./init-scripts/slave-init.sql:/docker-entrypoint-initdb.d/slave-init.sql
-      - slave1_data:/var/lib/mysql
-    networks:
-      - mysql-network
     depends_on:
-      - mysql-master
-    command: --server-id=2 --log-bin=mysql-bin --gtid-mode=ON --enforce-gtid-consistency=ON --read-only=1
-
-  # MySQL Slave 2
-  mysql-slave2:
-    image: mysql:8.0
-    container_name: mysql-slave2
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: testdb
-      MYSQL_USER: appuser
-      MYSQL_PASSWORD: apppass
-    ports:
-      - "3309:3306"
-    volumes:
-      - ./mysql-config/slave.cnf:/etc/mysql/conf.d/slave.cnf
-      - ./init-scripts/slave-init.sql:/docker-entrypoint-initdb.d/slave-init.sql
-      - slave2_data:/var/lib/mysql
-    networks:
-      - mysql-network
-    depends_on:
-      - mysql-master
-    command: --server-id=3 --log-bin=mysql-bin --gtid-mode=ON --enforce-gtid-consistency=ON --read-only=1
+      - mysql-source
 
   # ProxySQL
   proxysql:
     image: proxysql/proxysql:2.5.5
     container_name: proxysql
+    hostname: proxysql
+    networks:
+      - replicanet
+    volumes:
+      - ./proxysql.cnf:/etc/proxysql.cnf
+    healthcheck:
+      test: ["CMD", "proxysql_admin", "-u", "admin", "-padmin", "-h", "127.0.0.1", "-P", "6032", "--execute", "SELECT 1"]
+      timeout: 20s
+      retries: 5
     ports:
       - "6032:6032"  # Admin interface
       - "6033:6033"  # MySQL interface
-    volumes:
-      - ./proxysql-config/proxysql.cnf:/etc/proxysql.cnf
-    networks:
-      - mysql-network
     depends_on:
-      - mysql-master
-      - mysql-slave1
-      - mysql-slave2
+      - mysql-source
+      - mysql-replica1
+      - mysql-replica2
 
   # FastAPI Application
   fastapi-app:
-    build:
-      context: ./app
-      dockerfile: Dockerfile
-    container_name: fastapi-app
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=mysql://appuser:apppass@proxysql:6033/testdb
+    build: .
+    container_name: fastapi-crud-app
     networks:
-      - mysql-network
+      - replicanet
+    environment:
+      DB_HOST: proxysql
+      DB_PORT: 6033
+      DB_USER: root
+      DB_PASSWORD: mypass
+      DB_NAME: testdb
+      PORT: 5000
+    ports:
+      - "5000:5000"
     depends_on:
       - proxysql
     volumes:
-      - ./app:/app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-volumes:
-  master_data:
-  slave1_data:
-  slave2_data:
-
-networks:
-  mysql-network:
-    driver: bridge
+      - .:/app
+    restart: unless-stopped

@@ -1,0 +1,162 @@
+datadir="/var/lib/proxysql"
+errorlog="/var/lib/proxysql/proxysql.log"
+
+admin_variables=
+{
+    admin_credentials="admin:admin;radmin:radmin"
+    mysql_ifaces="0.0.0.0:6032"
+    refresh_interval=2000
+    web_enabled=true
+    web_port=6080
+    restapi_enabled=true
+    restapi_port=6070
+}
+
+mysql_variables=
+{
+    threads=4
+    max_connections=2048
+    default_query_delay=0
+    default_query_timeout=36000000
+    have_compress=true
+    poll_timeout=2000
+    interfaces="0.0.0.0:6033"
+    default_schema="information_schema"
+    stacksize=1048576
+    server_version="5.7.22"
+    connect_timeout_server=3000
+    monitor_username="monitor"
+    monitor_password="monitor"
+    monitor_history=600000
+    monitor_connect_interval=60000
+    monitor_ping_interval=10000
+    monitor_read_only_interval=1500
+    monitor_read_only_timeout=500
+    ping_interval_server_msec=120000
+    ping_timeout_server=500
+    commands_stats=true
+    sessions_sort=true
+    connect_retries_on_failure=10
+}
+
+# MySQL Servers
+mysql_servers =
+(
+    {
+        address="source"
+        port=3306
+        hostgroup=10
+        max_connections=100
+        max_replication_lag=5
+        weight=1
+        comment="Master/Source Server"
+    },
+    {
+        address="replica1"
+        port=3306
+        hostgroup=20
+        max_connections=100
+        max_replication_lag=5
+        weight=1
+        comment="Replica Server 1"
+    },
+    {
+        address="replica2"
+        port=3306
+        hostgroup=20
+        max_connections=100
+        max_replication_lag=5
+        weight=1
+        comment="Replica Server 2"
+    }
+)
+
+# MySQL Users
+mysql_users =
+(
+    {
+        username="root"
+        password="mypass"
+        default_hostgroup=10
+        transaction_persistent=1
+        comment="Root user"
+    },
+    {
+        username="monitor"
+        password="monitor"
+        default_hostgroup=10
+        active=1
+        comment="Monitor user"
+    }
+)
+
+# MySQL Query Rules for Read/Write Splitting
+mysql_query_rules =
+(
+    {
+        rule_id=1
+        active=1
+        match_pattern="^SELECT.*"
+        destination_hostgroup=20
+        apply=1
+        comment="Route SELECT queries to replica servers"
+    },
+    {
+        rule_id=2
+        active=1
+        match_pattern="^INSERT.*"
+        destination_hostgroup=10
+        apply=1
+        comment="Route INSERT queries to master server"
+    },
+    {
+        rule_id=3
+        active=1
+        match_pattern="^UPDATE.*"
+        destination_hostgroup=10
+        apply=1
+        comment="Route UPDATE queries to master server"
+    },
+    {
+        rule_id=4
+        active=1
+        match_pattern="^DELETE.*"
+        destination_hostgroup=10
+        apply=1
+        comment="Route DELETE queries to master server"
+    },
+    {
+        rule_id=5
+        active=1
+        match_pattern="^CREATE.*"
+        destination_hostgroup=10
+        apply=1
+        comment="Route CREATE queries to master server"
+    },
+    {
+        rule_id=6
+        active=1
+        match_pattern="^ALTER.*"
+        destination_hostgroup=10
+        apply=1
+        comment="Route ALTER queries to master server"
+    },
+    {
+        rule_id=7
+        active=1
+        match_pattern="^DROP.*"
+        destination_hostgroup=10
+        apply=1
+        comment="Route DROP queries to master server"
+    }
+)
+
+# MySQL Replication Hostgroups
+mysql_replication_hostgroups =
+(
+    {
+        writer_hostgroup=10
+        reader_hostgroup=20
+        comment="MySQL Replication Setup"
+    }
+)
